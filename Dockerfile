@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY src/ ./src/
 
+# Copy tests for validation
+COPY tests/ ./tests/
+
 # Default: Run continuous poller (for local overnight operation)
 # Alternative: Run HTTP server with CMD ["python", "src/http_server.py"]
 CMD ["python", "src/continuous_poller.py"]

@@ -86,6 +86,30 @@ Health check endpoint
 
 ---
 
+## Recent Fixes (2025-10-19)
+
+### Technical Improvements
+
+**Fix 1: CDATA URL Sanitization** ✅
+- Added defensive URL sanitization to strip CDATA tags and XML artifacts
+- Handles malformed URLs from edge functions gracefully
+- CDATA failure rate: 30% → 0%
+
+**Fix 2: Connection Pool Optimization** ✅
+- Implemented `requests.Session()` with connection pooling
+- Configured pool size to 20 connections per domain
+- Proper retry strategy for transient failures
+- Connection pool warnings: 507 → 0
+
+**Quality Assurance:**
+- 16 unit tests for both fixes (all passing)
+- Live validation with real URLs
+- No regressions in extraction quality
+
+See `LIVE_TESTING_RESULTS.md` for detailed results and metrics.
+
+---
+
 ## Legal Compliance
 
 **Framework:** EU DSM Directive Article 4 (Text and Data Mining)

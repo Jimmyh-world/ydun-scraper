@@ -19,10 +19,99 @@ import logging
 from urllib.robotparser import RobotFileParser
 from urllib.parse import urlparse
 from tdm_compliance import check_tdm_optout
+import re
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# User-Agent for compliance
+USER_AGENT = 'YdunScraperBot/1.0 (+https://kitt.agency/bot; TDM for news summarization; contact@kitt.agency)'
+
+
+def sanitize_url(url: str) -> str:
+    """
+    Remove CDATA wrapping and other XML artifacts if present
+
+    Defensive programming approach: even if edge function is fixed,
+    we handle CDATA tags that may slip through.
+
+    Args:
+        url: Raw URL string (may contain CDATA tags)
+
+    Returns:
+        Clean URL string
+
+    Examples:
+        '<![CDATA[https://example.com]]>' → 'https://example.com'
+        'https://example.com' → 'https://example.com' (unchanged)
+    """
+    if not url:
+        return url
+
+    original_url = url
+
+    # Strip CDATA tags recursively (in case of nested tags)
+    # Keep removing until no more CDATA tags are found
+    while '<![CDATA[' in url and ']]>' in url:
+        cleaned = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', url, count=1)
+        if cleaned == url:
+            break  # No match found, stop
+        url = cleaned
+
+    # Strip any leading/trailing whitespace
+    url = url.strip()
+
+    # Log if we had to clean
+    if url != original_url:
+        logger.info(f"Sanitized URL: {original_url} → {url}")
+
+    return url
+
+
+def create_session_with_pool(pool_size: int = 20) -> requests.Session:
+    """
+    Create requests session with connection pooling
+
+    Args:
+        pool_size: Maximum connections per domain (default: 20)
+
+    Returns:
+        Configured requests.Session with connection pooling
+    """
+    session = requests.Session()
+
+    # Configure retry strategy
+    retry_strategy = Retry(
+        total=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"],
+        backoff_factor=1
+    )
+
+    # Configure adapter with connection pooling
+    adapter = HTTPAdapter(
+        pool_connections=10,  # Number of connection pools to cache
+        pool_maxsize=pool_size,  # Max connections per pool
+        max_retries=retry_strategy
+    )
+
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    # Add User-Agent
+    session.headers.update({
+        'User-Agent': USER_AGENT
+    })
+
+    return session
+
+
+# Module-level shared session for connection pooling
+_session = create_session_with_pool(pool_size=20)
 
 
 def check_robots_txt(url: str) -> bool:
@@ -112,6 +201,9 @@ class ArticleExtractor:
             Dict with keys: success, url, title, content, author, published_at, metadata
         """
         try:
+            # Step 0: Sanitize URL (defensive - strip CDATA tags if present)
+            url = sanitize_url(url)
+
             # Step 1: Check robots.txt compliance
             if not check_robots_txt(url):
                 logger.warning(f"robots.txt disallows URL, skipping: {url}")
