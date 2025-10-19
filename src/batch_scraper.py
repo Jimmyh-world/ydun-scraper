@@ -18,27 +18,75 @@ import sys
 import json
 import time
 from typing import List, Dict, Any
-from article_extractor import ArticleExtractor
+from article_extractor import ArticleExtractor, get_crawl_delay
+from urllib.parse import urlparse
+from datetime import datetime, timedelta
+from collections import defaultdict
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
+# User-Agent for compliance with robots.txt and TDM standards
+# Format: BotName/Version (+URL; Purpose; ContactInfo)
+USER_AGENT = 'YdunScraperBot/1.0 (+https://kitt.agency/bot; TDM for news summarization; contact@kitt.agency)'
+
+
+class DomainRateLimiter:
+    """
+    Enforce per-domain rate limits from robots.txt
+
+    Respects crawl-delay directives to avoid overwhelming target servers
+    and ensure compliance with robots.txt requirements.
+    """
+
+    def __init__(self):
+        """Initialize rate limiter"""
+        self.last_request = defaultdict(lambda: datetime.min)
+        self.delays = {}  # domain -> crawl_delay seconds
+
+    def get_delay(self, domain: str) -> float:
+        """Get required delay for domain (from robots.txt or default)"""
+        return self.delays.get(domain, 1.0)  # Default 1 second
+
+    async def wait_if_needed(self, domain: str) -> None:
+        """Wait if we need to respect crawl-delay"""
+        required_delay = self.get_delay(domain)
+        last_req = self.last_request[domain]
+        elapsed = (datetime.now() - last_req).total_seconds()
+
+        if elapsed < required_delay:
+            wait_time = required_delay - elapsed
+            logger.info(f"Rate limit: waiting {wait_time:.2f}s for {domain}")
+            await asyncio.sleep(wait_time)
+
+        self.last_request[domain] = datetime.now()
+
+    def set_delay(self, domain: str, delay: float) -> None:
+        """Set crawl-delay for domain (from robots.txt)"""
+        self.delays[domain] = max(delay, 1.0)  # Minimum 1 second
+
 
 class BatchScraper:
     """
-    Batch article scraper with concurrent processing
+    Batch article scraper with concurrent processing and rate limiting
+
+    Enforces:
+    - robots.txt crawl-delay per domain
+    - Reduced concurrency (default 3) to avoid overwhelming servers
+    - Proper User-Agent identification for TDM compliance
     """
 
-    def __init__(self, max_concurrent: int = 10, timeout: int = 10):
+    def __init__(self, max_concurrent: int = 3, timeout: int = 10):
         """
         Args:
-            max_concurrent: Maximum concurrent URL fetches (default: 10)
+            max_concurrent: Maximum concurrent URL fetches (default: 3 for compliance)
             timeout: Timeout per URL in seconds (default: 10)
         """
         self.max_concurrent = max_concurrent
         self.timeout = timeout
         self.extractor = ArticleExtractor(timeout=timeout)
+        self.rate_limiter = DomainRateLimiter()
 
     async def scrape_batch(self, urls: List[str]) -> Dict[str, Any]:
         """
@@ -104,9 +152,17 @@ class BatchScraper:
 
     async def _scrape_with_limit(self, url: str, semaphore: asyncio.Semaphore) -> Dict[str, Any]:
         """
-        Scrape single URL with semaphore for concurrency control
+        Scrape single URL with semaphore for concurrency control and rate limiting
         """
         async with semaphore:
+            # Get domain and crawl-delay
+            domain = urlparse(url).netloc
+            crawl_delay = get_crawl_delay(url)
+            self.rate_limiter.set_delay(domain, crawl_delay)
+
+            # Wait if needed to respect crawl-delay
+            await self.rate_limiter.wait_if_needed(domain)
+
             # Run sync extractor in thread pool
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self.extractor.extract, url)

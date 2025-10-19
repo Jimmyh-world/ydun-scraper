@@ -166,6 +166,44 @@ See `MUNDUS-INTEGRATION.md` for complete API specification.
 - Per active extraction: depends on article size
 - Typical total: 500-800 MB with 4 workers
 
+## Compliance Validation
+
+### Compliance Controls
+
+The service implements EU DSM Directive Article 4 compliance:
+
+1. **robots.txt Compliance** - Respects crawl-delay and disallow rules
+2. **TDM Opt-Out Detection** - Checks HTTP headers and meta tags
+3. **User-Agent Identification** - Identifies as TDM bot
+4. **Per-Domain Rate Limiting** - 1-2 second delays between requests
+5. **Audit Trail Logging** - All compliance decisions logged
+
+### Monitor Compliance Logs
+
+```bash
+# View compliance decisions
+docker compose logs ydun-scraper | grep -E "TDM|robots|Rate limit"
+
+# Expected output:
+# INFO:article_extractor:robots.txt crawl-delay for example.com: 1.0s
+# INFO:tdm_compliance:TDM ALLOWED: https://example.com - No opt-out signals detected
+# INFO:batch_scraper:Rate limit: waiting 1.00s for example.com
+```
+
+### Validate Live Compliance
+
+```bash
+# Test with known news site
+curl -X POST http://localhost:5000/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://www.svd.se/nyheter/"]}'
+
+# Check logs for compliance logs
+docker compose logs ydun-scraper --tail 20 | grep -E "robots|TDM|Rate"
+```
+
+---
+
 ## Monitoring
 
 ### Docker Logs

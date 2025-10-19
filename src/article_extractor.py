@@ -16,10 +16,70 @@ from newspaper import Article as NewspaperArticle
 from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
+from urllib.robotparser import RobotFileParser
+from urllib.parse import urlparse
+from tdm_compliance import check_tdm_optout
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def check_robots_txt(url: str) -> bool:
+    """
+    Check if URL is allowed by robots.txt
+
+    Returns True if allowed, False if disallowed, True if robots.txt unavailable (fail open)
+    """
+    try:
+        parsed = urlparse(url)
+        domain = f"{parsed.scheme}://{parsed.netloc}"
+        robots_url = f"{domain}/robots.txt"
+
+        parser = RobotFileParser()
+        parser.set_url(robots_url)
+        parser.read()
+
+        # Check if YdunScraperBot is allowed
+        allowed = parser.can_fetch("YdunScraperBot/1.0", url)
+
+        if not allowed:
+            logger.warning(f"robots.txt disallows scraping: {url}")
+
+        return allowed
+    except Exception as e:
+        logger.debug(f"Could not read robots.txt for {url}: {e}")
+        # Fail open - allow scraping if robots.txt unavailable
+        return True
+
+
+def get_crawl_delay(url: str) -> float:
+    """
+    Get crawl-delay from robots.txt for the URL's domain
+
+    Returns crawl-delay in seconds, defaults to 1.0 if unavailable
+    """
+    try:
+        parsed = urlparse(url)
+        domain = f"{parsed.scheme}://{parsed.netloc}"
+        robots_url = f"{domain}/robots.txt"
+
+        parser = RobotFileParser()
+        parser.set_url(robots_url)
+        parser.read()
+
+        # Get crawl-delay for YdunScraperBot
+        delay = parser.crawl_delay("YdunScraperBot/1.0")
+
+        if delay:
+            logger.info(f"robots.txt crawl-delay for {domain}: {delay}s")
+            return delay
+        else:
+            logger.info(f"No crawl-delay in robots.txt for {domain}, using default 1.0s")
+            return 1.0
+    except Exception as e:
+        logger.debug(f"Could not read crawl-delay from robots.txt for {url}: {e}")
+        return 1.0
 
 
 class ArticleExtractor:
@@ -52,6 +112,20 @@ class ArticleExtractor:
             Dict with keys: success, url, title, content, author, published_at, metadata
         """
         try:
+            # Step 1: Check robots.txt compliance
+            if not check_robots_txt(url):
+                logger.warning(f"robots.txt disallows URL, skipping: {url}")
+                return {
+                    'success': False,
+                    'url': url,
+                    'error': 'robots.txt disallows scraping',
+                    'title': None,
+                    'content': None,
+                    'author': None,
+                    'published_at': None,
+                    'metadata': {'extraction_method': 'none', 'robots_txt_blocked': True}
+                }
+
             # Try trafilatura first (fastest, most reliable)
             result = self._extract_with_trafilatura(url)
             if result['success'] and len(result['content']) > 500:
@@ -60,11 +134,12 @@ class ArticleExtractor:
 
             logger.info(f"Trafilatura failed for {url}, trying newspaper3k...")
 
-            # Fallback to newspaper3k
-            result = self._extract_with_newspaper(url)
-            if result['success'] and len(result['content']) > 500:
-                result['metadata']['extraction_method'] = 'newspaper3k'
-                return result
+            # Fallback to newspaper3k (with robots.txt check)
+            if check_robots_txt(url):
+                result = self._extract_with_newspaper(url)
+                if result['success'] and len(result['content']) > 500:
+                    result['metadata']['extraction_method'] = 'newspaper3k'
+                    return result
 
             # Both failed
             logger.warning(f"All extraction methods failed for {url}")
@@ -95,10 +170,16 @@ class ArticleExtractor:
     def _extract_with_trafilatura(self, url: str) -> Dict[str, Any]:
         """Extract using trafilatura (primary method)"""
         try:
-            # Download HTML
+            # Download HTML (robots.txt is checked before calling this method)
             downloaded = trafilatura.fetch_url(url)
             if not downloaded:
                 return {'success': False, 'url': url}
+
+            # Check TDM opt-out signals
+            allowed, reason = check_tdm_optout(url, downloaded)
+            if not allowed:
+                logger.warning(f"TDM opt-out detected for {url}: {reason}")
+                return {'success': False, 'url': url, 'error': f'TDM opt-out: {reason}'}
 
             # Extract content with metadata
             result = trafilatura.extract(

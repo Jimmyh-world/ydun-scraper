@@ -86,20 +86,66 @@ Health check endpoint
 
 ---
 
+## Legal Compliance
+
+**Framework:** EU DSM Directive Article 4 (Text and Data Mining)
+
+The scraper implements comprehensive compliance controls for lawful TDM operations:
+
+### Implemented Controls
+
+1. **robots.txt Compliance**
+   - Respects crawl-delay directives from target websites
+   - Honors disallow rules
+   - Identifies as `YdunScraperBot/1.0`
+
+2. **TDMRep Opt-Out Detection**
+   - Checks HTTP headers (`X-TDM-Opt-Out`, `TDM-Reservation`)
+   - Detects HTML meta tags (`tdm-reservation`, robots `noai`)
+   - Blocks scraping on opt-out signals
+
+3. **Per-Domain Rate Limiting**
+   - Reduced concurrency to 3 (from 10)
+   - Enforces minimum 1-2 second delays between requests
+   - Respects robots.txt crawl-delay
+
+4. **Audit Trail Logging**
+   - All compliance decisions logged
+   - Full audit trail for GDPR compliance
+   - TDM allowed/blocked decisions recorded
+
+**Status:** ✅ Fully Compliant (2025-10-19)
+
+See `COMPLIANCE.md` for detailed framework documentation.
+
+---
+
 ## Deployment
 
 **Production:** Deployed on Beast (192.168.68.100) via Docker Compose
 **External Access:** https://ydun.kitt.agency (via Cloudflare Tunnel)
 **Called By:** Mundus Supabase edge function
 
+See `DEPLOYMENT.md` for detailed deployment instructions.
+
 ---
 
 ## Development
 
 **Language:** Python 3.11
-**Dependencies:** trafilatura, newspaper3k, Flask
+**Dependencies:** trafilatura, newspaper3k, Flask, beautifulsoup4
 **Testing:** pytest (when needed)
+**Compliance:** Full EU DSM Directive Article 4 compliance
 
 ---
 
-**Last Updated:** 2025-10-17
+## Documentation
+
+- `COMPLIANCE.md` - Legal compliance framework (EU DSM Directive Article 4)
+- `DEPLOYMENT.md` - Deployment guide and troubleshooting
+- `LIVE_TESTING_RESULTS.md` - Testing results and performance metrics
+
+---
+
+**Last Updated:** 2025-10-19
+**Status:** ✅ Production Ready - Legal Compliant
